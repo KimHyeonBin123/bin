@@ -39,73 +39,67 @@ for tree in rune_data:
         for rune in slot["runes"]:
             rune_name_to_img[rune["name"]] = rune["icon"]
 
-# --- 챔피언 선택 ---
+# --- 사이드바 ---
 champion_list = sorted(df['champion'].unique())
 selected_champion = st.sidebar.selectbox("Select Champion", champion_list)
 champ_df = df[df['champion']==selected_champion]
 
-st.title(f"Champion: {selected_champion}")
+# --- 아이템 통계 ---
+def compute_item_stats(df):
+    item_cols = [c for c in df.columns if c.startswith('item')]
+    records = []
+    for c in item_cols:
+        tmp = df[['matchId','win_clean',c]].rename(columns={c:'item'})
+        records.append(tmp)
+    union = pd.concat(records, ignore_index=True)
+    union = union[union['item']!='']
+    stats = union.groupby('item').agg(total_picks=('matchId','count'), wins=('win_clean','sum')).reset_index()
+    stats['win_rate'] = (stats['wins']/stats['total_picks']*100).round(2)
+    stats['pick_rate'] = (stats['total_picks']/df['matchId'].nunique()*100).round(2)
+    return stats.sort_values('win_rate', ascending=False)
 
-# --- 추천 아이템 ---
+# --- Spell 통계 ---
+def compute_spell_stats(df):
+    stats = df.groupby(['spell1','spell2']).agg(total_games=('matchId','count'), wins=('win_clean','sum')).reset_index()
+    stats['win_rate'] = (stats['wins']/stats['total_games']*100).round(2)
+    stats['pick_rate'] = (stats['total_games']/df['matchId'].nunique()*100).round(2)
+    return stats.sort_values('win_rate', ascending=False)
+
+# --- Rune 통계 ---
+def compute_rune_stats(df):
+    stats = df.groupby(['rune_core','rune_sub']).agg(total_games=('matchId','count'), wins=('win_clean','sum')).reset_index()
+    stats['win_rate'] = (stats['wins']/stats['total_games']*100).round(2)
+    stats['pick_rate'] = (stats['total_games']/df['matchId'].nunique()*100).round(2)
+    return stats.sort_values('win_rate', ascending=False)
+
+# --- Helper: add icon HTML ---
+def add_icon_html(name, img_dict, width=20):
+    img_file = img_dict.get(name)
+    if img_file:
+        return f'<img src="http://ddragon.leagueoflegends.com/cdn/13.17.1/img/item/{img_file}" width="{width}" style="vertical-align:middle;"> {name}'
+    else:
+        return name
+
+# --- 아이템 표 ---
 st.subheader("Recommended Items")
-item_cols = [c for c in champ_df.columns if c.startswith('item')]
-records = []
-for c in item_cols:
-    tmp = champ_df[['matchId','win_clean',c]].rename(columns={c:'item'})
-    records.append(tmp)
-union = pd.concat(records, ignore_index=True)
-union = union[union['item']!='']
-stats = union.groupby('item').agg(total_picks=('matchId','count'), wins=('win_clean','sum')).reset_index()
-stats['win_rate'] = (stats['wins']/stats['total_picks']*100).round(2)
-stats['pick_rate'] = (stats['total_picks']/champ_df['matchId'].nunique()*100).round(2)
-stats = stats.sort_values('win_rate', ascending=False).head(10)
+items = compute_item_stats(champ_df)
+items["item"] = items["item"].apply(lambda x: add_icon_html(x, item_name_to_img, width=20))
+st.markdown(items.to_html(escape=False, index=False), unsafe_allow_html=True)
 
-# HTML 테이블 생성
-html_items = '<table style="border-collapse: collapse;">'
-html_items += '<tr>'
-for _, row in stats.iterrows():
-    img_url = f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/item/{item_name_to_img.get(row["item"], "")}"
-    html_items += f'<td style="text-align:center; padding:4px;">'
-    html_items += f'<img src="{img_url}" width="25px"><br>'
-    html_items += f'{row["item"]}<br>WR:{row["win_rate"]}%<br>PR:{row["pick_rate"]}%'
-    html_items += '</td>'
-html_items += '</tr></table>'
-st.markdown(html_items, unsafe_allow_html=True)
-
-# --- 추천 스펠 ---
+# --- Spell 표 ---
 st.subheader("Recommended Spell Combos")
-spells = champ_df.groupby(['spell1','spell2']).agg(total_games=('matchId','count'), wins=('win_clean','sum')).reset_index()
-spells['win_rate'] = (spells['wins']/spells['total_games']*100).round(2)
-spells['pick_rate'] = (spells['total_games']/champ_df['matchId'].nunique()*100).round(2)
-spells = spells.sort_values('win_rate', ascending=False).head(10)
+spells = compute_spell_stats(champ_df)
+spells["spell1"] = spells["spell1"].apply(lambda x: add_icon_html(x, spell_name_to_img, width=15))
+spells["spell2"] = spells["spell2"].apply(lambda x: add_icon_html(x, spell_name_to_img, width=15))
+st.markdown(spells.to_html(escape=False, index=False), unsafe_allow_html=True)
 
-html_spells = '<table style="border-collapse: collapse;">'
-html_spells += '<tr>'
-for _, row in spells.iterrows():
-    s1_url = f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/spell/{spell_name_to_img.get(row['spell1'], '')}"
-    s2_url = f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/spell/{spell_name_to_img.get(row['spell2'], '')}"
-    html_spells += f'<td style="text-align:center; padding:4px;">'
-    html_spells += f'<img src="{s1_url}" width="20px"> + <img src="{s2_url}" width="20px"><br>'
-    html_spells += f'{row["spell1"]} + {row["spell2"]}<br>WR:{row["win_rate"]}%<br>PR:{row["pick_rate"]}%'
-    html_spells += '</td>'
-html_spells += '</tr></table>'
-st.markdown(html_spells, unsafe_allow_html=True)
-
-# --- 추천 룬 ---
+# --- Rune 표 ---
 st.subheader("Recommended Runes")
-runes = champ_df.groupby(['rune_core','rune_sub']).agg(total_games=('matchId','count'), wins=('win_clean','sum')).reset_index()
-runes['win_rate'] = (runes['wins']/runes['total_games']*100).round(2)
-runes['pick_rate'] = (runes['total_games']/champ_df['matchId'].nunique()*100).round(2)
-runes = runes.sort_values('win_rate', ascending=False).head(10)
+runes = compute_rune_stats(champ_df)
+runes["rune_core"] = runes["rune_core"].apply(lambda x: add_icon_html(x, rune_name_to_img, width=15))
+runes["rune_sub"] = runes["rune_sub"].apply(lambda x: add_icon_html(x, rune_name_to_img, width=15))
+st.markdown(runes.to_html(escape=False, index=False), unsafe_allow_html=True)
 
-html_runes = '<table style="border-collapse: collapse;">'
-html_runes += '<tr>'
-for _, row in runes.iterrows():
-    core_url = f"http://ddragon.leagueoflegends.com/cdn/img/{rune_name_to_img.get(row['rune_core'], '')}"
-    sub_url = f"http://ddragon.leagueoflegends.com/cdn/img/{rune_name_to_img.get(row['rune_sub'], '')}"
-    html_runes += f'<td style="text-align:center; padding:4px;">'
-    html_runes += f'<img src="{core_url}" width="25px"> + <img src="{sub_url}" width="20px"><br>'
-    html_runes += f'{row["rune_core"]} + {row["rune_sub"]}<br>WR:{row["win_rate"]}%<br>PR:{row["pick_rate"]}%'
-    html_runes += '</td>'
-html_runes += '</tr></table>'
-st.markdown(html_runes, unsafe_allow_html=True)
+# --- Raw Data ---
+st.subheader("Raw Data")
+st.dataframe(champ_df)
