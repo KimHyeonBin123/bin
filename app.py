@@ -163,30 +163,23 @@ if any(c in dfc.columns for c in tl_cols):
 def champ_icon(name): return f"https://ddragon.leagueoflegends.com/cdn/14.24.1/img/champion/{name}.png"
 def item_icon(name): return f"https://ddragon.leagueoflegends.com/cdn/14.24.1/img/item/{name}.png"
 def spell_icon(name): return f"https://ddragon.leagueoflegends.com/cdn/14.24.1/img/spell/{name}.png"
-def rune_icon(name): return f"https://raw.community.rune.url/{name}.png"  # 실제 URL 수정 필요
+def rune_icon(name): return f"https://raw.community.rune.url/{name}.png"  # 실제 URL로 수정 필요
 
 # ---------- 챔피언 아이콘 ----------
 st.subheader("선택 챔피언")
-c1, c2 = st.columns([1,3])
-with c1:
-    st.image(champ_icon(sel_champ), width=ICON_SIZE)
-with c2:
-    st.caption(sel_champ)
+st.image(champ_icon(sel_champ), width=ICON_SIZE, caption=sel_champ)
 
-# ---------- 코어 아이템 ----------
+# ---------- 코어 아이템 아이콘 ----------
 st.subheader("코어 아이템")
 core_cols = ["first_core_item_name","second_core_item_name"]
 for col in core_cols:
     if col in dfc.columns and dfc[col].notna().any():
         items = dfc[col].dropna().unique()
-        cols = st.columns(len(items))
-        for i, it in enumerate(items):
-            with cols[i]:
-                st.image(item_icon(it), width=ICON_SIZE)
-                st.caption(it)
+        for it in items:
+            st.image(item_icon(it), width=ICON_SIZE, caption=it)
 
-# ---------- 아이템 성과 ----------
-st.subheader("아이템 성과(슬롯 무시)")
+# ---------- 아이템 성과 아이콘 ----------
+st.subheader("아이템 성과(슬롯 무시, 상위 10개)")
 def item_stats(sub: pd.DataFrame) -> pd.DataFrame:
     item_cols = [c for c in sub.columns if c.startswith("item")]
     rec = []
@@ -201,44 +194,34 @@ def item_stats(sub: pd.DataFrame) -> pd.DataFrame:
     g = g.sort_values(["total_picks","win_rate"], ascending=[False,False])
     return g
 
-g = item_stats(dfc).head(10)
-cols = st.columns(len(g))
-for i, row in g.iterrows():
-    with cols[i]:
-        st.image(item_icon(row["item"]), width=ICON_SIZE)
-        st.caption(f"{row['item']}\n픽률: {row['total_picks']}, 승률: {row['win_rate']}%")
+top_items = item_stats(dfc).head(10)
+for _, row in top_items.iterrows():
+    st.image(item_icon(row["item"]), width=ICON_SIZE,
+             caption=f"{row['item']}\n픽률:{row['total_picks']} 승률:{row['win_rate']}%")
 
-# ---------- 스펠 ----------
-st.subheader("스펠 조합")
+# ---------- 스펠 아이콘 ----------
+st.subheader("스펠 조합 (상위 5개)")
 if "spell_combo" in dfc.columns and dfc["spell_combo"].str.strip().any():
     sp = dfc.groupby("spell_combo").agg(games=("matchId","count"), wins=("win_clean","sum")).reset_index()
     sp["win_rate"] = (sp["wins"]/sp["games"]*100).round(2)
     sp = sp.sort_values(["games","win_rate"], ascending=[False,False]).head(5)
     for _, row in sp.iterrows():
         spells = row["spell_combo"].split(" + ")
-        cols = st.columns(len(spells))
-        for i, spn in enumerate(spells):
-            with cols[i]:
-                st.image(spell_icon(spn), width=ICON_SIZE)
-                st.caption(spn)
+        for spn in spells:
+            st.image(spell_icon(spn), width=ICON_SIZE, caption=spn)
 
-# ---------- 룬 ----------
-st.subheader("룬 조합")
+# ---------- 룬 아이콘 ----------
+st.subheader("룬 조합 (상위 5개)")
 if ("rune_core" in dfc.columns) and ("rune_sub" in dfc.columns):
     rn = dfc.groupby(["rune_core","rune_sub"]).agg(games=("matchId","count"), wins=("win_clean","sum")).reset_index()
     rn["win_rate"] = (rn["wins"]/rn["games"]*100).round(2)
     rn = rn.sort_values(["games","win_rate"], ascending=[False,False]).head(5)
     for _, row in rn.iterrows():
         runes = [row["rune_core"], row["rune_sub"]]
-        cols = st.columns(len(runes))
-        for i, rn_name in enumerate(runes):
-            with cols[i]:
-                st.image(rune_icon(rn_name), width=ICON_SIZE)
-                st.caption(rn_name)
+        for rn_name in runes:
+            st.image(rune_icon(rn_name), width=ICON_SIZE, caption=rn_name)
 
 # ---------- 원본 데이터 ----------
 st.subheader("원본 데이터 (필터 적용)")
 show_cols = [c for c in dfc.columns if c not in ("team_champs","enemy_champs")]
-st.dataframe(dfc[show_cols], use_container_width=True)
-st.markdown("---")
-st.caption("CSV 자동탐색 + 업로드 지원 · 누락 컬럼은 자동으로 건너뜁니다.")
+st.dataframe(dfc[show_cols],_]()
