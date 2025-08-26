@@ -1,19 +1,15 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
 import requests
 
 st.set_page_config(page_title="ARAM PS Dashboard", layout="wide")
 CSV_PATH = "./aram_participants_clean_preprocessed.csv"
 
-# --- 데이터 로드 ---
+# --- Load Data ---
 @st.cache_data
 def load_data(path):
     df = pd.read_csv(path)
-    if 'win' in df.columns:
-        df['win_clean'] = df['win'].apply(lambda x: 1 if str(x).lower() in ('1','true','t','yes') else 0)
-    else:
-        df['win_clean'] = 0
+    df['win_clean'] = df['win'].apply(lambda x: 1 if str(x).lower() in ('1','true','t','yes') else 0)
     item_cols = [c for c in df.columns if c.startswith('item')]
     for c in item_cols:
         df[c] = df[c].fillna('').astype(str).str.strip()
@@ -23,45 +19,18 @@ def load_data(path):
     df['rune_sub'] = df['rune_sub'].astype(str).str.strip()
     return df
 
-# --- 통계 계산 ---
-def compute_item_stats(df):
-    item_cols = [c for c in df.columns if c.startswith('item')]
-    records = []
-    for c in item_cols:
-        tmp = df[['matchId','win_clean',c]].rename(columns={c:'item'})
-        records.append(tmp)
-    union = pd.concat(records, ignore_index=True)
-    union = union[union['item']!='']
-    stats = union.groupby('item').agg(total_picks=('matchId','count'),
-                                     wins=('win_clean','sum')).reset_index()
-    stats['win_rate'] = (stats['wins']/stats['total_picks']*100).round(2)
-    stats['pick_rate'] = (stats['total_picks']/df['matchId'].nunique()*100).round(2)
-    return stats.sort_values('win_rate', ascending=False)
-
-def compute_spell_stats(df):
-    stats = df.groupby(['spell1','spell2']).agg(total_games=('matchId','count'),
-                                                 wins=('win_clean','sum')).reset_index()
-    stats['win_rate'] = (stats['wins']/stats['total_games']*100).round(2)
-    stats['pick_rate'] = (stats['total_games']/df['matchId'].nunique()*100).round(2)
-    return stats.sort_values('win_rate', ascending=False)
-
-def compute_rune_stats(df):
-    stats = df.groupby(['rune_core','rune_sub']).agg(total_games=('matchId','count'),
-                                                      wins=('win_clean','sum')).reset_index()
-    stats['win_rate'] = (stats['wins']/stats['total_games']*100).round(2)
-    stats['pick_rate'] = (stats['total_games']/df['matchId'].nunique()*100).round(2)
-    return stats.sort_values('win_rate', ascending=False)
-
-# --- 데이터 로드 ---
 df = load_data(CSV_PATH)
 
 # --- Data Dragon Resources ---
+# 아이템
 item_data = requests.get("http://ddragon.leagueoflegends.com/cdn/13.17.1/data/ko_KR/item.json").json()
 item_name_to_img = {v["name"]: v["image"]["full"] for k,v in item_data["data"].items()}
 
+# 스펠
 spell_data = requests.get("http://ddragon.leagueoflegends.com/cdn/13.17.1/data/ko_KR/summoner.json").json()
 spell_name_to_img = {v["name"]: v["image"]["full"] for k,v in spell_data["data"].items()}
 
+# 룬
 rune_data = requests.get("http://ddragon.leagueoflegends.com/cdn/13.17.1/data/ko_KR/runesReforged.json").json()
 rune_name_to_img = {}
 for tree in rune_data:
@@ -70,85 +39,73 @@ for tree in rune_data:
         for rune in slot["runes"]:
             rune_name_to_img[rune["name"]] = rune["icon"]
 
-# --- 사이드바 ---
-st.sidebar.title('ARAM PS Controls')
+# --- 챔피언 선택 ---
 champion_list = sorted(df['champion'].unique())
 selected_champion = st.sidebar.selectbox("Select Champion", champion_list)
 champ_df = df[df['champion']==selected_champion]
 
 st.title(f"Champion: {selected_champion}")
-st.metric("Games Played", len(champ_df))
-st.metric("Win Rate (%)", round(champ_df['win_clean'].mean()*100,2))
-st.metric("Pick Rate (%)", round(len(champ_df)/df['matchId'].nunique()*100,2))
 
-# --- Plotly Table Helper ---
-def plot_table_with_icons(df_stats, name_col, img_dict, top_n=10):
-    df_stats = df_stats.head(top_n).copy()
-    imgs = []
-    names = []
-    wrs = []
-    prs = []
-    for _, row in df_stats.iterrows():
-        name = row[name_col]
-        img_file = img_dict.get(name, None)
-        if img_file:
-            img_tag = f'<img src="{img_file}" width="25px">'
-        else:
-            img_tag = ''
-        imgs.append(img_tag)
-        names.append(name)
-        wrs.append(f"{row['win_rate']}%")
-        prs.append(f"{row['pick_rate']}%")
-    fig = go.Figure(data=[go.Table(
-        header=dict(values=["아이콘","이름","Win Rate","Pick Rate"],
-                    fill_color='lightblue', align='center'),
-        cells=dict(values=[imgs,names,wrs,prs],
-                   fill_color='lavender', align='center'),
-    )])
-    st.plotly_chart(fig, use_container_width=True)
-
-# --- 아이템 ---
+# --- 추천 아이템 ---
 st.subheader("Recommended Items")
-items = compute_item_stats(champ_df)
-item_img_dict = {k:f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/item/{v}" for k,v in item_name_to_img.items()}
-plot_table_with_icons(items, "item", item_img_dict, top_n=10)
+item_cols = [c for c in champ_df.columns if c.startswith('item')]
+records = []
+for c in item_cols:
+    tmp = champ_df[['matchId','win_clean',c]].rename(columns={c:'item'})
+    records.append(tmp)
+union = pd.concat(records, ignore_index=True)
+union = union[union['item']!='']
+stats = union.groupby('item').agg(total_picks=('matchId','count'), wins=('win_clean','sum')).reset_index()
+stats['win_rate'] = (stats['wins']/stats['total_picks']*100).round(2)
+stats['pick_rate'] = (stats['total_picks']/champ_df['matchId'].nunique()*100).round(2)
+stats = stats.sort_values('win_rate', ascending=False).head(10)
 
-# --- 스펠 ---
-st.subheader("Recommended Spells (Icon Combo)")
-spells = compute_spell_stats(champ_df)
-spell_img_dict = {k:f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/spell/{v}" for k,v in spell_name_to_img.items()}
+# HTML 테이블 생성
+html_items = '<table style="border-collapse: collapse;">'
+html_items += '<tr>'
+for _, row in stats.iterrows():
+    img_url = f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/item/{item_name_to_img.get(row["item"], "")}"
+    html_items += f'<td style="text-align:center; padding:4px;">'
+    html_items += f'<img src="{img_url}" width="25px"><br>'
+    html_items += f'{row["item"]}<br>WR:{row["win_rate"]}%<br>PR:{row["pick_rate"]}%'
+    html_items += '</td>'
+html_items += '</tr></table>'
+st.markdown(html_items, unsafe_allow_html=True)
 
-# 두 아이콘 합쳐서 한 셀에 표시
-spells_imgs = []
-names = []
-wrs = []
-prs = []
-for _, row in spells.head(10).iterrows():
-    s1 = spell_img_dict.get(row['spell1'], '')
-    s2 = spell_img_dict.get(row['spell2'], '')
-    if s1 and s2:
-        img_tag = f'<img src="{s1}" width="25px"> <img src="{s2}" width="25px">'
-    elif s1:
-        img_tag = f'<img src="{s1}" width="25px">'
-    elif s2:
-        img_tag = f'<img src="{s2}" width="25px">'
-    else:
-        img_tag = ''
-    spells_imgs.append(img_tag)
-    names.append(f"{row['spell1']} + {row['spell2']}")
-    wrs.append(f"{row['win_rate']}%")
-    prs.append(f"{row['pick_rate']}%")
+# --- 추천 스펠 ---
+st.subheader("Recommended Spell Combos")
+spells = champ_df.groupby(['spell1','spell2']).agg(total_games=('matchId','count'), wins=('win_clean','sum')).reset_index()
+spells['win_rate'] = (spells['wins']/spells['total_games']*100).round(2)
+spells['pick_rate'] = (spells['total_games']/champ_df['matchId'].nunique()*100).round(2)
+spells = spells.sort_values('win_rate', ascending=False).head(10)
 
-fig = go.Figure(data=[go.Table(
-    header=dict(values=["아이콘","스펠","Win Rate","Pick Rate"],
-                fill_color='lightblue', align='center'),
-    cells=dict(values=[spells_imgs,names,wrs,prs],
-               fill_color='lavender', align='center'),
-)])
-st.plotly_chart(fig, use_container_width=True)
+html_spells = '<table style="border-collapse: collapse;">'
+html_spells += '<tr>'
+for _, row in spells.iterrows():
+    s1_url = f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/spell/{spell_name_to_img.get(row['spell1'], '')}"
+    s2_url = f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/spell/{spell_name_to_img.get(row['spell2'], '')}"
+    html_spells += f'<td style="text-align:center; padding:4px;">'
+    html_spells += f'<img src="{s1_url}" width="20px"> + <img src="{s2_url}" width="20px"><br>'
+    html_spells += f'{row["spell1"]} + {row["spell2"]}<br>WR:{row["win_rate"]}%<br>PR:{row["pick_rate"]}%'
+    html_spells += '</td>'
+html_spells += '</tr></table>'
+st.markdown(html_spells, unsafe_allow_html=True)
 
-# --- 룬 ---
+# --- 추천 룬 ---
 st.subheader("Recommended Runes")
-runes = compute_rune_stats(champ_df)
-rune_img_dict = {k:f"http://ddragon.leagueoflegends.com/cdn/img/{v}" for k,v in rune_name_to_img.items()}
-plot_table_with_icons(runes, "rune_core", rune_img_dict, top_n=10)
+runes = champ_df.groupby(['rune_core','rune_sub']).agg(total_games=('matchId','count'), wins=('win_clean','sum')).reset_index()
+runes['win_rate'] = (runes['wins']/runes['total_games']*100).round(2)
+runes['pick_rate'] = (runes['total_games']/champ_df['matchId'].nunique()*100).round(2)
+runes = runes.sort_values('win_rate', ascending=False).head(10)
+
+html_runes = '<table style="border-collapse: collapse;">'
+html_runes += '<tr>'
+for _, row in runes.iterrows():
+    core_url = f"http://ddragon.leagueoflegends.com/cdn/img/{rune_name_to_img.get(row['rune_core'], '')}"
+    sub_url = f"http://ddragon.leagueoflegends.com/cdn/img/{rune_name_to_img.get(row['rune_sub'], '')}"
+    html_runes += f'<td style="text-align:center; padding:4px;">'
+    html_runes += f'<img src="{core_url}" width="25px"> + <img src="{sub_url}" width="20px"><br>'
+    html_runes += f'{row["rune_core"]} + {row["rune_sub"]}<br>WR:{row["win_rate"]}%<br>PR:{row["pick_rate"]}%'
+    html_runes += '</td>'
+html_runes += '</tr></table>'
+st.markdown(html_runes, unsafe_allow_html=True)
