@@ -10,22 +10,17 @@ CSV_PATH = "./aram_participants_clean_preprocessed.csv"
 def load_data(path):
     df = pd.read_csv(path)
     df['win_clean'] = df['win'].apply(lambda x: 1 if str(x).lower() in ('1','true','t','yes') else 0)
-    item_cols = [c for c in df.columns if c.startswith('item')]
-    for c in item_cols:
+    for c in [col for col in df.columns if col.startswith('item')]:
         df[c] = df[c].fillna('').astype(str).str.strip()
-    df['spell1'] = df['spell1'].astype(str).str.strip()
-    df['spell2'] = df['spell2'].astype(str).str.strip()
-    df['rune_core'] = df['rune_core'].astype(str).str.strip()
-    df['rune_sub'] = df['rune_sub'].astype(str).str.strip()
+    for c in ['spell1','spell2','rune_core','rune_sub']:
+        df[c] = df[c].astype(str).str.strip()
     return df
 
 # --- Compute Stats ---
 def compute_item_stats(df):
-    item_cols = [c for c in df.columns if c.startswith('item')]
     records = []
-    for c in item_cols:
-        tmp = df[['matchId','win_clean',c]].rename(columns={c:'item'})
-        records.append(tmp)
+    for c in [col for col in df.columns if col.startswith('item')]:
+        records.append(df[['matchId','win_clean',c]].rename(columns={c:'item'}))
     union = pd.concat(records, ignore_index=True)
     union = union[union['item']!='']
     stats = union.groupby('item').agg(total_picks=('matchId','count'), wins=('win_clean','sum')).reset_index()
@@ -50,10 +45,10 @@ df = load_data(CSV_PATH)
 
 # --- Data Dragon Resources ---
 item_data = requests.get("http://ddragon.leagueoflegends.com/cdn/13.17.1/data/ko_KR/item.json").json()
-item_name_to_img = {v["name"]: v["image"]["full"] for k,v in item_data["data"].items()}
+item_name_to_img = {v["name"]: v["image"]["full"] for v in item_data["data"].values()}
 
 spell_data = requests.get("http://ddragon.leagueoflegends.com/cdn/13.17.1/data/ko_KR/summoner.json").json()
-spell_name_to_img = {v["name"]: v["image"]["full"] for k,v in spell_data["data"].items()}
+spell_name_to_img = {v["name"]: v["image"]["full"] for v in spell_data["data"].values()}
 
 rune_data = requests.get("http://ddragon.leagueoflegends.com/cdn/13.17.1/data/ko_KR/runesReforged.json").json()
 rune_name_to_img = {}
@@ -62,49 +57,6 @@ for tree in rune_data:
     for slot in tree["slots"]:
         for rune in slot["runes"]:
             rune_name_to_img[rune["name"]] = rune["icon"]
-
-# --- Utility Functions ---
-def get_item_img(item_name):
-    return item_name_to_img.get(item_name, None)
-
-def get_spell_img(spell_name):
-    return spell_name_to_img.get(spell_name, None)
-
-def get_rune_img(rune_name):
-    return rune_name_to_img.get(rune_name, None)
-
-def display_cards(data, img_map, is_dual=False, top_n=10, cols_per_row=5, icon_size=40):
-    for i in range(0, min(len(data), top_n), cols_per_row):
-        cols = st.columns(cols_per_row)
-        for j, row in enumerate(data.iloc[i:i+cols_per_row].itertuples()):
-            col = cols[j]
-            if is_dual:
-                img1 = img_map.get(row[1])
-                img2 = img_map.get(row[2])
-                if img1:
-                    col.image(f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/spell/{img1}", width=icon_size)
-                else:
-                    col.write("❓")
-                if img2:
-                    col.image(f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/spell/{img2}", width=icon_size)
-                else:
-                    col.write("❓")
-                col.markdown(f"<sub>{row[1]} + {row[2]}<br>WR:{row.win_rate}% PR:{row.pick_rate}%</sub>", unsafe_allow_html=True)
-            else:
-                img = img_map.get(row[1])
-                if img:
-                    if "item" in img_map:  # item
-                        url = f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/item/{img}"
-                    else:  # rune
-                        url = f"http://ddragon.leagueoflegends.com/cdn/img/{img}"
-                    col.image(url, width=icon_size)
-                else:
-                    col.write("❓")
-                # rune_core + rune_sub
-                if hasattr(row, 'rune_core'):
-                    col.markdown(f"<sub>{row.rune_core} + {row.rune_sub}<br>WR:{row.win_rate}% PR:{row.pick_rate}%</sub>", unsafe_allow_html=True)
-                else:
-                    col.markdown(f"<sub>{row[1]}<br>WR:{row.win_rate}% PR:{row.pick_rate}%</sub>", unsafe_allow_html=True)
 
 # --- Sidebar ---
 champion_list = sorted(df['champion'].unique())
@@ -119,17 +71,48 @@ st.subheader(selected_champion)
 # --- Items ---
 st.subheader("Recommended Items")
 items = compute_item_stats(champ_df)
-display_cards(items, item_name_to_img, is_dual=False, top_n=10, cols_per_row=5, icon_size=45)
+cols_per_row = 5
+for i in range(0, min(10,len(items)), cols_per_row):
+    cols = st.columns(cols_per_row)
+    for j, row in enumerate(items.iloc[i:i+cols_per_row].itertuples()):
+        col = cols[j]
+        img_file = item_name_to_img.get(row.item)
+        if img_file:
+            url = f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/item/{img_file}"
+            col.image(url, width=45)
+        col.markdown(f"<span style='font-size:12px'>{row.item}<br>WR:{row.win_rate}% PR:{row.pick_rate}%</span>", unsafe_allow_html=True)
 
 # --- Spells ---
 st.subheader("Recommended Spell Combos")
 spells = compute_spell_stats(champ_df)
-display_cards(spells, spell_name_to_img, is_dual=True, top_n=10, cols_per_row=5, icon_size=40)
+cols_per_row = 5
+for i in range(0, min(10,len(spells)), cols_per_row):
+    cols = st.columns(cols_per_row)
+    for j, row in enumerate(spells.iloc[i:i+cols_per_row].itertuples()):
+        col = cols[j]
+        s1 = spell_name_to_img.get(row.spell1)
+        s2 = spell_name_to_img.get(row.spell2)
+        if s1:
+            col.image(f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/spell/{s1}", width=40)
+        if s2:
+            col.image(f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/spell/{s2}", width=40)
+        col.markdown(f"<span style='font-size:12px'>{row.spell1} + {row.spell2}<br>WR:{row.win_rate}% PR:{row.pick_rate}%</span>", unsafe_allow_html=True)
 
 # --- Runes ---
 st.subheader("Recommended Runes")
 runes = compute_rune_stats(champ_df)
-display_cards(runes, rune_name_to_img, is_dual=False, top_n=9, cols_per_row=3, icon_size=40)
+cols_per_row = 3
+for i in range(0, min(9,len(runes)), cols_per_row):
+    cols = st.columns(cols_per_row)
+    for j, row in enumerate(runes.iloc[i:i+cols_per_row].itertuples()):
+        col = cols[j]
+        core_icon = rune_name_to_img.get(row.rune_core)
+        sub_icon = rune_name_to_img.get(row.rune_sub)
+        if core_icon:
+            col.image(f"http://ddragon.leagueoflegends.com/cdn/img/{core_icon}", width=40)
+        if sub_icon:
+            col.image(f"http://ddragon.leagueoflegends.com/cdn/img/{sub_icon}", width=40)
+        col.markdown(f"<span style='font-size:12px'>{row.rune_core} + {row.rune_sub}<br>WR:{row.win_rate}% PR:{row.pick_rate}%</span>", unsafe_allow_html=True)
 
 # --- Raw Data ---
 st.subheader("Raw Data")
