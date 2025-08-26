@@ -68,29 +68,26 @@ def _discover_csv() -> str | None:
 @st.cache_data(show_spinner=False)
 def load_df(path_or_buffer) -> pd.DataFrame:
     df = pd.read_csv(path_or_buffer)
-    if "win" in df.columns:
-        df["win_clean"] = df["win"].apply(_yes)
-    else:
-        df["win_clean"] = 0
+    # win -> 0/1
+    df["win_clean"] = df["win"].apply(_yes) if "win" in df.columns else 0
+    # 스펠 이름 컬럼 정규화(spell1_name/spell1)
     s1 = "spell1_name" if "spell1_name" in df.columns else ("spell1" if "spell1" in df.columns else None)
     s2 = "spell2_name" if "spell2_name" in df.columns else ("spell2" if "spell2" in df.columns else None)
     df["spell1_final"] = df[s1].astype(str) if s1 else ""
     df["spell2_final"] = df[s2].astype(str) if s2 else ""
     df["spell_combo"]  = (df["spell1_final"] + " + " + df["spell2_final"]).str.strip()
+    # 아이템 문자열 정리
     for c in [c for c in df.columns if c.startswith("item")]:
         df[c] = df[c].fillna("").astype(str).str.strip()
+    # 팀/상대 조합 문자열 → 리스트
     for col in ("team_champs", "enemy_champs"):
         if col in df.columns:
             df[col] = df[col].apply(_as_list)
-    if "game_end_min" in df.columns:
-        df["duration_min"] = pd.to_numeric(df["game_end_min"], errors="coerce")
-    else:
-        df["duration_min"] = np.nan
+    # 경기시간(분)
+    df["duration_min"] = pd.to_numeric(df["game_end_min"], errors="coerce") if "game_end_min" in df.columns else np.nan
     df["duration_min"] = df["duration_min"].fillna(18.0).clip(lower=6.0, upper=40.0)
-    if "damage_total" in df.columns:
-        df["dpm"] = df["damage_total"] / df["duration_min"].replace(0, np.nan)
-    else:
-        df["dpm"] = np.nan
+    # DPM, KDA
+    df["dpm"] = df["damage_total"] / df["duration_min"].replace(0, np.nan) if "damage_total" in df.columns else np.nan
     for c in ("kills","deaths","assists"):
         if c not in df.columns:
             df[c] = 0
@@ -154,8 +151,9 @@ if any(c in dfc.columns for c in tl_cols):
         fig = px.histogram(dfc, x="gold_spike_min", nbins=20, title="골드 스파이크 시각 분포(분)")
         st.plotly_chart(fig, use_container_width=True)
 
-# ---------- 코어 아이템 구매시각 ----------
-core_cols = [c for c in ["first_core_item_min","first_core_item_name","second_core_item_min","second_core_item_name"] if c in dfc.columns]
+# ---------- 코어 아이템 ----------
+core_cols = [c for c in ["first_core_item_min","first_core_item_name",
+                         "second_core_item_min","second_core_item_name"] if c in dfc.columns]
 if core_cols:
     st.subheader("코어 아이템 구매 타이밍")
     a, b = st.columns(2)
@@ -173,77 +171,59 @@ if core_cols:
                          x="second_core_item_min", nbins=24, title="2코어 시각 분포"),
             use_container_width=True
         )
+    core_rows = []
+    if "first_core_item_name" in dfc.columns:
+        core_rows.append(dfc[["matchId","win_clean","first_core_item_name"]].rename(columns={"first_core_item_name":"core_item"}))
+    if "second_core_item_name" in dfc.columns:
+        core_rows.append(dfc[["matchId","win_clean","second_core_item_name"]].rename(columns={"second_core_item_name":"core_item"}))
+    if core_rows:
+        union = pd.concat(core_rows, ignore_index=True)
+        union = union[union["core_item"].astype(str)!=""]
+        core_stats = (union.groupby("core_item")
+                      .agg(games=("matchId","count"), wins=("win_clean","sum"))
+                      .reset_index())
+        core_stats["win_rate"] = (core_stats["wins"]/core_stats["games"]*100).round(2)
+        core_stats = core_stats.sort_values(["games","win_rate"], ascending=[False,False])
+        st.dataframe(core_stats.head(20), use_container_width=True)
 
-# ---------- DDRAGON 아이템 데이터 ----------
-@st.cache_data(show_spinner=False)
-def load_item_data():
-    url = "http://ddragon.leagueoflegends.com/cdn/13.17.1/data/ko_KR/item.json"
-    try:
-        data = requests.get(url).json()["data"]
-        return {v["name"]: f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/item/{v['image']['full']}" 
-                for k,v in data.items()}
-    except Exception:
-        return {}
+# ---------- 아이템 성과 + 아이콘 (React 스타일) ----------
+st.subheader("아이템 성과 (아이콘 포함, Top 20)")
 
-item_name_to_img = load_item_data()
-
-def add_icon_html(item_name, img_map):
-    url = img_map.get(item_name, "")
-    if url:
-        return f'<img src="{url}" width="32" height="32" style="vertical-align:middle"> {item_name}'
-    return item_name
-
-def item_stats_with_icon(sub: pd.DataFrame):
+def item_stats_with_icon(sub: pd.DataFrame) -> pd.DataFrame:
     item_cols = [c for c in sub.columns if c.startswith("item")]
-    if not item_cols:
-        return pd.DataFrame(columns=["item","total_picks","wins","win_rate","item_icon"])
     rec = []
     for c in item_cols:
         rec.append(sub[["matchId","win_clean",c]].rename(columns={c:"item"}))
     u = pd.concat(rec, ignore_index=True)
     u = u[u["item"].astype(str)!=""]
+
     g = (u.groupby("item")
          .agg(total_picks=("matchId","count"), wins=("win_clean","sum"))
          .reset_index())
     g["win_rate"] = (g["wins"]/g["total_picks"]*100).round(2)
+
+    # 아이템 아이콘 URL 매핑
+    try:
+        item_data = requests.get("http://ddragon.leagueoflegends.com/cdn/13.17.1/data/ko_KR/item.json").json()
+        g["icon_url"] = g["item"].map(lambda x: f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/item/{item_data['data'][str(x)]['image']['full']}" if str(x) in item_data["data"] else "")
+    except Exception:
+        g["icon_url"] = ""
+
     g = g.sort_values(["total_picks","win_rate"], ascending=[False,False])
-    g["item_icon"] = g["item"].apply(lambda x: add_icon_html(x, item_name_to_img))
     return g
 
-def core_stats_with_icon(dfc):
-    core_rows = []
-    for col in ["first_core_item_name","second_core_item_name"]:
-        if col in dfc.columns:
-            core_rows.append(dfc[["matchId","win_clean",col]].rename(columns={col:"core_item"}))
-    if not core_rows:
-        return pd.DataFrame(columns=["core_item","games","wins","win_rate","item_icon"])
-    union = pd.concat(core_rows, ignore_index=True)
-    union = union[union["core_item"].astype(str)!=""]
-    core_stats = (union.groupby("core_item")
-                  .agg(games=("matchId","count"), wins=("win_clean","sum"))
-                  .reset_index())
-    core_stats["win_rate"] = (core_stats["wins"]/core_stats["games"]*100).round(2)
-    core_stats = core_stats.sort_values(["games","win_rate"], ascending=[False,False])
-    core_stats["item_icon"] = core_stats["core_item"].apply(lambda x: add_icon_html(x, item_name_to_img))
-    return core_stats
+df_items = item_stats_with_icon(dfc).head(20)
 
-# ---------- 아이템 성과 표시 ----------
-if not dfc.empty:
-    st.subheader("아이템 성과 (Top 20)")
-    df_items = item_stats_with_icon(dfc)
-    if not df_items.empty:
-        for _, row in df_items.head(20).iterrows():
-            st.markdown(row["item_icon"] + f" — 픽: {row['total_picks']}, 승률: {row['win_rate']}%", unsafe_allow_html=True)
-    else:
-        st.info("아이템 데이터가 없습니다.")
-
-    st.subheader("코어 아이템 성과 (Top 20)")
-    df_core = core_stats_with_icon(dfc)
-    if not df_core.empty:
-        for _, row in df_core.head(20).iterrows():
-            st.markdown(row["item_icon"] + f" — 픽: {row['games']}, 승률: {row['win_rate']}%", unsafe_allow_html=True)
-    else:
-        st.info("코어 아이템 데이터가 없습니다.")
+cols_per_row = 5
+for i in range(0, len(df_items), cols_per_row):
+    row = df_items.iloc[i:i+cols_per_row]
+    cols = st.columns(len(row))
+    for idx, (_, item) in enumerate(row.iterrows()):
+        with cols[idx]:
+            if item["icon_url"]:
+                st.image(item["icon_url"], width=64)
+            st.markdown(f"**{item['item']}**")
+            st.markdown(f"Pick: {item['total_picks']}, Win: {item['win_rate']}%")
 
 # ---------- 스펠/룬 ----------
 c1, c2 = st.columns(2)
@@ -261,4 +241,19 @@ with c1:
 
 with c2:
     st.subheader("룬 조합(메인/보조)")
-    if ("rune_core" in dfc.columns) and ("rune_sub" in
+    if ("rune_core" in dfc.columns) and ("rune_sub" in dfc.columns):
+        rn = (dfc.groupby(["rune_core","rune_sub"])
+              .agg(games=("matchId","count"), wins=("win_clean","sum"))
+              .reset_index())
+        rn["win_rate"] = (rn["wins"]/rn["games"]*100).round(2)
+        rn = rn.sort_values(["games","win_rate"], ascending=[False,False])
+        st.dataframe(rn.head(10), use_container_width=True)
+    else:
+        st.info("룬 정보가 부족합니다.")
+
+# ---------- 원본 ----------
+st.subheader("원본 데이터 (필터 적용)")
+show_cols = [c for c in dfc.columns if c not in ("team_champs","enemy_champs")]
+st.dataframe(dfc[show_cols], use_container_width=True)
+st.markdown("---")
+st.caption("CSV 자동탐색 + 업로드 지원 · 누락 컬럼은 자동으로 건너뜁니다.")
