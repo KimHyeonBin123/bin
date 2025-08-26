@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import requests
 
 st.set_page_config(page_title="ARAM PS Dashboard", layout="wide")
 CSV_PATH = "./aram_participants_clean_preprocessed.csv"
@@ -12,6 +13,10 @@ def load_data(path):
     item_cols = [c for c in df.columns if c.startswith('item')]
     for c in item_cols:
         df[c] = df[c].fillna('').astype(str).str.strip()
+    df['spell1'] = df['spell1'].astype(str).str.strip()
+    df['spell2'] = df['spell2'].astype(str).str.strip()
+    df['rune_core'] = df['rune_core'].astype(str).str.strip()
+    df['rune_sub'] = df['rune_sub'].astype(str).str.strip()
     return df
 
 # --- Compute Stats ---
@@ -40,8 +45,28 @@ def compute_rune_stats(df):
     stats['pick_rate'] = (stats['total_games']/df['matchId'].nunique()*100).round(2)
     return stats.sort_values('win_rate', ascending=False)
 
-# --- Load ---
+# --- Load Data ---
 df = load_data(CSV_PATH)
+
+# --- Data Dragon Resources ---
+# 아이템
+item_data = requests.get("http://ddragon.leagueoflegends.com/cdn/13.17.1/data/ko_KR/item.json").json()
+item_name_to_img = {v["name"]: v["image"]["full"] for k,v in item_data["data"].items()}
+
+# 스펠
+spell_data = requests.get("http://ddragon.leagueoflegends.com/cdn/13.17.1/data/ko_KR/summoner.json").json()
+spell_name_to_img = {v["name"]: v["image"]["full"] for k,v in spell_data["data"].items()}
+
+# 룬
+rune_data = requests.get("http://ddragon.leagueoflegends.com/cdn/13.17.1/data/ko_KR/runesReforged.json").json()
+rune_name_to_img = {}
+for tree in rune_data:
+    main_id = tree["id"]
+    main_icon = tree["icon"]
+    rune_name_to_img[tree["name"]] = main_icon
+    for slot in tree["slots"]:
+        for rune in slot["runes"]:
+            rune_name_to_img[rune["name"]] = rune["icon"]
 
 # --- Sidebar ---
 champion_list = sorted(df['champion'].unique())
@@ -53,34 +78,21 @@ champ_icon_url = f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/champion/{
 st.image(champ_icon_url, width=80)
 st.subheader(selected_champion)
 
-# --- Recommended Items ---
+# --- Items ---
 st.subheader("Recommended Items")
 items = compute_item_stats(champ_df)
-item_name_to_id = {
-    "광전사의 군화":3006, "마법사의 신발":3020, "닌자의 신발":3047,
-    "헤르메스의 발걸음":3111, "신속의 장화":3009, "명석함의 아이오니아 장화":3158,
-    "기동력의 장화":3009
-}
-
 cols = st.columns(5)
 for idx, row in items.head(10).iterrows():
     col = cols[idx%5]
-    item_id = item_name_to_id.get(row['item'])
-    if item_id:
-        url = f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/item/{item_id}.png"
+    img_file = item_name_to_img.get(row['item'])
+    if img_file:
+        url = f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/item/{img_file}"
         col.image(url, width=50)
     col.caption(f"{row['item']}\nWR:{row['win_rate']}%\nPR:{row['pick_rate']}%")
 
-# --- Recommended Spells ---
+# --- Spells ---
 st.subheader("Recommended Spell Combos")
 spells = compute_spell_stats(champ_df)
-spell_name_to_img = {
-    "Flash":"SummonerFlash.png", "Ignite":"SummonerDot.png", 
-    "Heal":"SummonerHeal.png","Teleport":"SummonerTeleport.png",
-    "Smite":"SummonerSmite.png","Exhaust":"SummonerExhaust.png",
-    "Barrier":"SummonerBarrier.png","Cleanse":"SummonerBoost.png"
-}
-
 cols = st.columns(5)
 for idx, row in spells.head(10).iterrows():
     col = cols[idx%5]
@@ -92,14 +104,19 @@ for idx, row in spells.head(10).iterrows():
         col.image(f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/spell/{s2}", width=40)
     col.caption(f"{row['spell1']} + {row['spell2']}\nWR:{row['win_rate']}%\nPR:{row['pick_rate']}%")
 
-# --- Recommended Runes ---
+# --- Runes ---
 st.subheader("Recommended Runes")
 runes = compute_rune_stats(champ_df)
-# 룬 ID → 이미지 매핑 필요, 임시로 이름만 표시
 cols = st.columns(3)
 for idx, row in runes.head(9).iterrows():
     col = cols[idx%3]
-    col.write(f"{row['rune_core']} + {row['rune_sub']}\nWR:{row['win_rate']}%\nPR:{row['pick_rate']}%")
+    core_icon = rune_name_to_img.get(row['rune_core'])
+    sub_icon = rune_name_to_img.get(row['rune_sub'])
+    if core_icon:
+        col.image(f"http://ddragon.leagueoflegends.com/cdn/img/{core_icon}", width=50)
+    if sub_icon:
+        col.image(f"http://ddragon.leagueoflegends.com/cdn/img/{sub_icon}", width=50)
+    col.caption(f"{row['rune_core']} + {row['rune_sub']}\nWR:{row['win_rate']}%\nPR:{row['pick_rate']}%")
 
 # --- Raw Data ---
 st.subheader("Raw Data")
