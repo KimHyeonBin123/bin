@@ -92,7 +92,7 @@ def plot_table_with_icons(df_stats, name_col, img_dict, top_n=10):
         name = row[name_col]
         img_file = img_dict.get(name, None)
         if img_file:
-            img_tag = f'<img src="http://ddragon.leagueoflegends.com/cdn/13.17.1/img/item/{img_file}" width="25px">'
+            img_tag = f'<img src="{img_file}" width="25px">'
         else:
             img_tag = ''
         imgs.append(img_tag)
@@ -110,14 +110,42 @@ def plot_table_with_icons(df_stats, name_col, img_dict, top_n=10):
 # --- 아이템 ---
 st.subheader("Recommended Items")
 items = compute_item_stats(champ_df)
-plot_table_with_icons(items, "item", item_name_to_img, top_n=10)
+item_img_dict = {k:f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/item/{v}" for k,v in item_name_to_img.items()}
+plot_table_with_icons(items, "item", item_img_dict, top_n=10)
 
 # --- 스펠 ---
-st.subheader("Recommended Spells")
+st.subheader("Recommended Spells (Icon Combo)")
 spells = compute_spell_stats(champ_df)
-# spell은 img url 다름
 spell_img_dict = {k:f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/spell/{v}" for k,v in spell_name_to_img.items()}
-plot_table_with_icons(spells, "spell1", spell_img_dict, top_n=10)  # spell1 기준
+
+# 두 아이콘 합쳐서 한 셀에 표시
+spells_imgs = []
+names = []
+wrs = []
+prs = []
+for _, row in spells.head(10).iterrows():
+    s1 = spell_img_dict.get(row['spell1'], '')
+    s2 = spell_img_dict.get(row['spell2'], '')
+    if s1 and s2:
+        img_tag = f'<img src="{s1}" width="25px"> <img src="{s2}" width="25px">'
+    elif s1:
+        img_tag = f'<img src="{s1}" width="25px">'
+    elif s2:
+        img_tag = f'<img src="{s2}" width="25px">'
+    else:
+        img_tag = ''
+    spells_imgs.append(img_tag)
+    names.append(f"{row['spell1']} + {row['spell2']}")
+    wrs.append(f"{row['win_rate']}%")
+    prs.append(f"{row['pick_rate']}%")
+
+fig = go.Figure(data=[go.Table(
+    header=dict(values=["아이콘","스펠","Win Rate","Pick Rate"],
+                fill_color='lightblue', align='center'),
+    cells=dict(values=[spells_imgs,names,wrs,prs],
+               fill_color='lavender', align='center'),
+)])
+st.plotly_chart(fig, use_container_width=True)
 
 # --- 룬 ---
 st.subheader("Recommended Runes")
