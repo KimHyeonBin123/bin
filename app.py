@@ -159,7 +159,7 @@ if any(c in dfc.columns for c in tl_cols):
         fig = px.histogram(dfc, x="gold_spike_min", nbins=20, title="골드 스파이크 시각 분포(분)")
         st.plotly_chart(fig, use_container_width=True)
 
-# ---------- 유틸: 이미지 URL ----------
+# ---------- 이미지 URL ----------
 def champ_icon(name): return f"https://ddragon.leagueoflegends.com/cdn/14.24.1/img/champion/{name}.png"
 def item_icon(name): return f"https://ddragon.leagueoflegends.com/cdn/14.24.1/img/item/{name}.png"
 def spell_icon(name): return f"https://ddragon.leagueoflegends.com/cdn/14.24.1/img/spell/{name}.png"
@@ -224,4 +224,6 @@ if ("rune_core" in dfc.columns) and ("rune_sub" in dfc.columns):
 # ---------- 원본 데이터 ----------
 st.subheader("원본 데이터 (필터 적용)")
 show_cols = [c for c in dfc.columns if c not in ("team_champs","enemy_champs")]
-st.dataframe(dfc[show_cols],_]()
+st.dataframe(dfc[show_cols], use_container_width=True)
+st.markdown("---")
+st.caption("CSV 자동탐색 + 업로드 지원 · 누락 컬럼은 자동으로 건너뜁니다.")
