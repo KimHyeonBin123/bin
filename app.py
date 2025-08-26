@@ -46,17 +46,16 @@ df = load_data(CSV_PATH)
 # --- Sidebar ---
 champion_list = sorted(df['champion'].unique())
 selected_champion = st.sidebar.selectbox("Select Champion", champion_list)
-
 champ_df = df[df['champion']==selected_champion]
 
 # --- Champion Icon ---
 champ_icon_url = f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/champion/{selected_champion}.png"
 st.image(champ_icon_url, width=80)
+st.subheader(selected_champion)
 
 # --- Recommended Items ---
 st.subheader("Recommended Items")
 items = compute_item_stats(champ_df)
-# 이름 → 아이템ID 매핑 (예시)
 item_name_to_id = {
     "광전사의 군화":3006, "마법사의 신발":3020, "닌자의 신발":3047,
     "헤르메스의 발걸음":3111, "신속의 장화":3009, "명석함의 아이오니아 장화":3158,
@@ -66,14 +65,14 @@ item_name_to_id = {
 cols = st.columns(5)
 for idx, row in items.head(10).iterrows():
     col = cols[idx%5]
-    item_id = item_name_to_id.get(row['item'], None)
+    item_id = item_name_to_id.get(row['item'])
     if item_id:
         url = f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/item/{item_id}.png"
         col.image(url, width=50)
     col.caption(f"{row['item']}\nWR:{row['win_rate']}%\nPR:{row['pick_rate']}%")
 
 # --- Recommended Spells ---
-st.subheader("Recommended Spells")
+st.subheader("Recommended Spell Combos")
 spells = compute_spell_stats(champ_df)
 spell_name_to_img = {
     "Flash":"SummonerFlash.png", "Ignite":"SummonerDot.png", 
@@ -87,15 +86,16 @@ for idx, row in spells.head(10).iterrows():
     col = cols[idx%5]
     s1 = spell_name_to_img.get(row['spell1'])
     s2 = spell_name_to_img.get(row['spell2'])
-    if s1 and s2:
-        col.image([f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/spell/{s1}",
-                   f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/spell/{s2}"], width=40)
-    col.caption(f"{row['spell1']}+{row['spell2']}\nWR:{row['win_rate']}%\nPR:{row['pick_rate']}%")
+    if s1:
+        col.image(f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/spell/{s1}", width=40)
+    if s2:
+        col.image(f"http://ddragon.leagueoflegends.com/cdn/13.17.1/img/spell/{s2}", width=40)
+    col.caption(f"{row['spell1']} + {row['spell2']}\nWR:{row['win_rate']}%\nPR:{row['pick_rate']}%")
 
 # --- Recommended Runes ---
 st.subheader("Recommended Runes")
 runes = compute_rune_stats(champ_df)
-# 임시: 이름만 표시, 아이콘은 룬 ID 매핑 필요
+# 룬 ID → 이미지 매핑 필요, 임시로 이름만 표시
 cols = st.columns(3)
 for idx, row in runes.head(9).iterrows():
     col = cols[idx%3]
