@@ -2,66 +2,69 @@
 # ------------------------------------------------------------------
 # ARAM PS Dashboard + Data-Dragon 아이콘 (Streamlit 1.32+ 호환)
 # ------------------------------------------------------------------
-import os, ast, requests
+import os, ast, re, unicodedata, requests
 from io import BytesIO
 from typing import List
 import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.express as px
-from PIL import Image
 
 st.set_page_config(page_title="ARAM PS Dashboard", layout="wide")
 
 # ------------------------------------------------------------------
-# Data-Dragon 이미지 helpers
+# Data-Dragon helpers (동적 매핑)
 # ------------------------------------------------------------------
-DDRAGON_VERSION = "14.1.1"            # 리그 패치 버전에 맞춰 갱신
-_CHAMP_FIX = {
-    "Aurelion Sol":"AurelionSol","Cho'Gath":"Chogath","Dr. Mundo":"DrMundo",
-    "Jarvan IV":"JarvanIV","Kai'Sa":"Kaisa","Kha'Zix":"Khazix","Kog'Maw":"KogMaw",
-    "LeBlanc":"Leblanc","Lee Sin":"LeeSin","Master Yi":"MasterYi",
-    "Miss Fortune":"MissFortune","Nunu & Willump":"Nunu","Rek'Sai":"RekSai",
-    "Renata Glasc":"Renata","Tahm Kench":"TahmKench","Twisted Fate":"TwistedFate",
-    "Vel'Koz":"Velkoz","Wukong":"MonkeyKing","Xin Zhao":"XinZhao"
-}
+@st.cache_data(show_spinner=False, ttl=86400)
+def ddragon_version()->str:
+    return requests.get("https://ddragon.leagueoflegends.com/api/versions.json", timeout=5).json()[0]
 
-@st.cache_data(show_spinner=False)
-def champion_icon_url(name:str) -> str:
-    n = _CHAMP_FIX.get(name, name.replace(" ","").replace("'",""))
-    return f"https://ddragon.leagueoflegends.com/cdn/{DDRAGON_VERSION}/img/champion/{n}.png"
+@st.cache_data(show_spinner=False, ttl=86400)
+def load_dd_maps(ver:str):
+    # Champion
+    champs = requests.get(f"https://ddragon.leagueoflegends.com/cdn/{ver}/data/en_US/champion.json", timeout=5).json()["data"]
+    champ_name2file = { cdata["name"]: cdata["id"] + ".png" for cdata in champs.values() }
+    champ_alias = { re.sub(r"[ '&.:]", "", cdata["name"]).lower(): cdata["id"] + ".png" for cdata in champs.values() }
 
-_ITEM_ID = {
-    "Infinity Edge":"3031","Rabadon's Deathcap":"3089","Void Staff":"3135",
-    "Zhonya's Hourglass":"3157","Kraken Slayer":"6672","Galeforce":"6671",
-    "Berserker's Greaves":"3006","Ionian Boots of Lucidity":"3158",
-    "Plated Steelcaps":"3047","Mercury's Treads":"3111","Boots of Swiftness":"3009",
-    "Health Potion":"2003","Control Ward":"2055","Doran's Blade":"1055",
-    "Doran's Ring":"1056","Doran's Shield":"1054",
-}
+    # Items
+    items = requests.get(f"https://ddragon.leagueoflegends.com/cdn/{ver}/data/en_US/item.json", timeout=5).json()["data"]
+    item_name2id = { v["name"]: k for k, v in items.items() }
 
-def item_icon_url(item:str) -> str:
-    return f"https://ddragon.leagueoflegends.com/cdn/{DDRAGON_VERSION}/img/item/{_ITEM_ID.get(item,'1001')}.png"
+    # Spells
+    spells = requests.get(f"https://ddragon.leagueoflegends.com/cdn/{ver}/data/en_US/summoner.json", timeout=5).json()["data"]
+    spell_name2key = { v["name"]: v["id"] for v in spells.values() }
 
-_SPELL_KEY = {
-    "Flash":"SummonerFlash","Ignite":"SummonerDot","Heal":"SummonerHeal",
-    "Barrier":"SummonerBarrier","Exhaust":"SummonerExhaust","Teleport":"SummonerTeleport",
-    "Ghost":"SummonerHaste","Cleanse":"SummonerBoost","Smite":"SummonerSmite",
-    "Mark":"SummonerSnowball","Snowball":"SummonerSnowball","Clarity":"SummonerMana"
-}
+    return {"champ_name2file": champ_name2file, "champ_alias": champ_alias,
+            "item_name2id": item_name2id, "spell_name2key": spell_name2key}
 
-def spell_icon_url(spell:str) -> str:
-    return f"https://ddragon.leagueoflegends.com/cdn/{DDRAGON_VERSION}/img/spell/{_SPELL_KEY.get(spell.strip(),'SummonerFlash')}.png"
+DDRAGON_VERSION = ddragon_version()
+DD = load_dd_maps(DDRAGON_VERSION)
 
-@st.cache_data(show_spinner=False)
-def load_image(url:str) -> Image.Image | None:
-    try:
-        return Image.open(BytesIO(requests.get(url,timeout=5).content))
-    except:
-        return None
+def champion_icon_url(name:str)->str:
+    key = DD["champ_name2file"].get(name)
+    if not key:
+        n = re.sub(r"[ '&.:]", "", name).lower()
+        key = DD["champ_alias"].get(n)
+    if not key:
+        # 최후 fallback
+        key = re.sub(r"[ '&.:]", "", name)
+        key = key[0].upper() + key[1:] + ".png"
+    return f"https://ddragon.leagueoflegends.com/cdn/{DDRAGON_VERSION}/img/champion/{key}"
+
+def item_icon_url(item:str)->str:
+    iid = DD["item_name2id"].get(item)
+    if not iid:
+        return f"https://ddragon.leagueoflegends.com/cdn/{DDRAGON_VERSION}/img/item/1001.png"
+    return f"https://ddragon.leagueoflegends.com/cdn/{DDRAGON_VERSION}/img/item/{iid}.png"
+
+def spell_icon_url(spell:str)->str:
+    skey = DD["spell_name2key"].get(spell.strip())
+    if not skey:
+        skey = "SummonerFlash"
+    return f"https://ddragon.leagueoflegends.com/cdn/{DDRAGON_VERSION}/img/spell/{skey}.png"
 
 # ------------------------------------------------------------------
-# CSV 로더
+# CSV loader
 # ------------------------------------------------------------------
 CSV_CANDIDATES = [
     "aram_participants_with_full_runes_merged_plus.csv",
@@ -95,53 +98,30 @@ def _as_list(s):
     spl = "|" if "|" in s else "," if "," in s else None
     return [t.strip() for t in s.split(spl)] if spl else [s]
 
-# ---------------------- 안전한 load_df ----------------------
 @st.cache_data(show_spinner=False)
 def load_df(buf) -> pd.DataFrame:
     df = pd.read_csv(buf)
-
-    # 승패 정리
     df["win_clean"] = df.get("win", 0).apply(_yes)
-
-    # 스펠 이름 → 콤보
     s1 = "spell1_name" if "spell1_name" in df else "spell1"
     s2 = "spell2_name" if "spell2_name" in df else "spell2"
     df["spell_combo"] = (df[s1].astype(str) + " + " + df[s2].astype(str)).str.strip()
-
-    # 아이템 컬럼 정리
     for c in [c for c in df if c.startswith("item")]:
         df[c] = df[c].fillna("").astype(str).str.strip()
-
-    # 챔프 리스트형 컬럼 정리
     for col in ("team_champs", "enemy_champs"):
         if col in df:
             df[col] = df[col].apply(_as_list)
-
-    # 게임 시간 (없으면 기본 18분)
-    if "game_end_min" in df.columns:
-        df["duration_min"] = (
-            pd.to_numeric(df["game_end_min"], errors="coerce")
-            .fillna(18)
-            .clip(6, 40)
-        )
-    else:
-        df["duration_min"] = 18
-
-    # 분당 딜량
-    df["dpm"] = df.get("damage_total", np.nan) / df["duration_min"].replace(0, np.nan)
-
-    # KDA 관련
-    for k in ("kills", "deaths", "assists"):
-        df[k] = df.get(k, 0)
-    df["kda"] = (df["kills"] + df["assists"]) / df["deaths"].replace(0, np.nan)
+    df["duration_min"] = pd.to_numeric(df.get("game_end_min",18), errors="coerce").fillna(18).clip(6,40)
+    df["dpm"] = df.get("damage_total", np.nan) / df["duration_min"].replace(0,np.nan)
+    for k in ("kills","deaths","assists"):
+        df[k] = df.get(k,0)
+    df["kda"] = (df["kills"] + df["assists"]) / df["deaths"].replace(0,np.nan)
     df["kda"] = df["kda"].fillna(df["kills"] + df["assists"])
-
     return df
 
 # ------------------------------------------------------------------
-# 사이드바
+# Sidebar
 # ------------------------------------------------------------------
-st.sidebar.header(":톱니바퀴:  설정")
+st.sidebar.header(":톱니바퀴: 설정")
 auto = _discover_csv()
 st.sidebar.write(":돋보기: 자동 검색:", auto if auto else "없음")
 up = st.sidebar.file_uploader("CSV 업로드(선택)", type="csv")
@@ -154,9 +134,9 @@ champions = sorted(df["champion"].dropna().unique())
 sel = st.sidebar.selectbox(":다트: 챔피언 선택", champions)
 
 # ------------------------------------------------------------------
-# 헤더 & 메트릭
+# Header & Metrics
 # ------------------------------------------------------------------
-dfc = df[df["champion"] == sel]
+dfc = df[df["champion"]==sel]
 total = df["matchId"].nunique() if "matchId" in df else len(df)
 games = len(dfc)
 wr = round(dfc["win_clean"].mean()*100,2) if games else 0
@@ -165,11 +145,9 @@ avg_k, avg_d, avg_a = [round(dfc[c].mean(),2) for c in ("kills","deaths","assist
 avg_dpm = round(dfc["dpm"].mean(),1)
 
 st.title(":트로피: ARAM Analytics")
-ic = load_image(champion_icon_url(sel))
 mid = st.columns([2,3,2])[1]
 with mid:
-    if ic:
-        st.image(ic, width=100)
+    st.image(champion_icon_url(sel), width=100)
     st.subheader(sel, divider=False)
 
 m1, m2, m3, m4, m5 = st.columns(5)
@@ -179,6 +157,8 @@ m3.metric("픽률", f"{pr}%")
 m4.metric("평균 K/D/A", f"{avg_k}/{avg_d}/{avg_a}")
 m5.metric("평균 DPM", avg_dpm)
 
+# ------------------------------------------------------------------
+# Tabs
 # ------------------------------------------------------------------
 tab1, tab2, tab3, tab4 = st.tabs([":막대_차트: 게임 분석",
                                   ":교차된_검: 아이템 & 스펠",
@@ -193,7 +173,6 @@ with tab1:
 
 with tab2:
     left, right = st.columns(2)
-    # 아이템
     with left:
         st.subheader(":방패: 아이템 성과")
         item_cols = [c for c in dfc if c.startswith("item")]
@@ -206,13 +185,13 @@ with tab2:
              .head(10)
              .reset_index())
         for _,r in g.iterrows():
-            c_icon, c_name, c_pick, c_wr = st.columns([1,4,2,2])
+            block = st.container()
+            c_icon, c_name, c_pick, c_wr = block.columns([1,4,2,2])
             with c_icon: st.image(item_icon_url(str(r.item)), width=32)
-            with c_name: st.write(str(r.item))
-            with c_pick: st.write(f"{int(r.total)} 게임")
-            with c_wr: st.write(f"{r.win_rate}%")
+            with c_name: c_name.write(str(r.item))
+            with c_pick: c_pick.write(f"{int(r.total)} 게임")
+            with c_wr:   c_wr.write(f"{r.win_rate}%")
             st.divider()
-    # 스펠
     with right:
         st.subheader(":반짝임: 스펠 조합")
         sp = (dfc.groupby("spell_combo")
@@ -223,12 +202,13 @@ with tab2:
               .reset_index())
         for _, r in sp.iterrows():
             s1, s2 = [s.strip() for s in str(r.spell_combo).split("+")]
-            col_i, col_n, col_v = st.columns([2,3,2])
+            block = st.container()
+            col_i, col_n, col_v = block.columns([2,3,2])
             with col_i:
                 st.image(spell_icon_url(s1), width=28)
                 st.image(spell_icon_url(s2), width=28)
-            with col_n: st.write(str(r.spell_combo))
-            with col_v: st.write(f"{r.win_rate}%\n{int(r.games)}G")
+            with col_n: col_n.write(str(r.spell_combo))
+            with col_v: col_v.write(f"{r.win_rate}%\n{int(r.games)}G")
             st.divider()
 
 with tab3:
