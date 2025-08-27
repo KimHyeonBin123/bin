@@ -20,16 +20,13 @@ def ddragon_version()->str:
 
 @st.cache_data(show_spinner=False, ttl=86400)
 def load_dd_maps(ver:str):
-    # Champion
     champs = requests.get(f"https://ddragon.leagueoflegends.com/cdn/{ver}/data/en_US/champion.json", timeout=5).json()["data"]
     champ_name2file = { cdata["name"]: cdata["id"] + ".png" for cdata in champs.values() }
     champ_alias = { re.sub(r"[ '&.:]", "", cdata["name"]).lower(): cdata["id"] + ".png" for cdata in champs.values() }
 
-    # Items
     items = requests.get(f"https://ddragon.leagueoflegends.com/cdn/{ver}/data/en_US/item.json", timeout=5).json()["data"]
     item_name2id = { v["name"]: k for k, v in items.items() }
 
-    # Spells
     spells = requests.get(f"https://ddragon.leagueoflegends.com/cdn/{ver}/data/en_US/summoner.json", timeout=5).json()["data"]
     spell_name2key = { v["name"]: v["id"] for v in spells.values() }
 
@@ -39,6 +36,19 @@ def load_dd_maps(ver:str):
 DDRAGON_VERSION = ddragon_version()
 DD = load_dd_maps(DDRAGON_VERSION)
 
+# -----------------------
+# 이름 정규화
+# -----------------------
+def norm_name(s):
+    """이름 정규화: NFKD, 소문자, 공백/특수문자 제거"""
+    if not isinstance(s,str): return ""
+    s = unicodedata.normalize("NFKD", s)
+    s = re.sub(r"[ '&.:]", "", s).lower()
+    return s
+
+# -----------------------
+# Icon URL functions
+# -----------------------
 def champion_icon_url(name:str)->str:
     key = DD["champ_name2file"].get(name)
     if not key:
@@ -50,16 +60,18 @@ def champion_icon_url(name:str)->str:
     return f"https://ddragon.leagueoflegends.com/cdn/{DDRAGON_VERSION}/img/champion/{key}"
 
 def item_icon_url(item:str)->str:
-    iid = DD["item_name2id"].get(item)
-    if not iid:
-        return f"https://ddragon.leagueoflegends.com/cdn/{DDRAGON_VERSION}/img/item/1001.png"
-    return f"https://ddragon.leagueoflegends.com/cdn/{DDRAGON_VERSION}/img/item/{iid}.png"
+    key = norm_name(item)
+    for k,v in DD["item_name2id"].items():
+        if norm_name(k) == key:
+            return f"https://ddragon.leagueoflegends.com/cdn/{DDRAGON_VERSION}/img/item/{v}.png"
+    return f"https://ddragon.leagueoflegends.com/cdn/{DDRAGON_VERSION}/img/item/1001.png"
 
 def spell_icon_url(spell:str)->str:
-    skey = DD["spell_name2key"].get(spell.strip())
-    if not skey:
-        skey = "SummonerFlash"
-    return f"https://ddragon.leagueoflegends.com/cdn/{DDRAGON_VERSION}/img/spell/{skey}.png"
+    key = norm_name(spell)
+    for k,v in DD["spell_name2key"].items():
+        if norm_name(k) == key:
+            return f"https://ddragon.leagueoflegends.com/cdn/{DDRAGON_VERSION}/img/spell/{v}.png"
+    return f"https://ddragon.leagueoflegends.com/cdn/{DDRAGON_VERSION}/img/spell/SummonerFlash.png"
 
 # ------------------------------------------------------------------
 # CSV loader
@@ -108,7 +120,6 @@ def load_df(buf) -> pd.DataFrame:
     for col in ("team_champs","enemy_champs"):
         if col in df:
             df[col] = df[col].apply(_as_list)
-    # ✅ game_end_min 없을 때 안전 처리
     if "game_end_min" in df.columns:
         df["duration_min"] = pd.to_numeric(df["game_end_min"], errors="coerce").fillna(18).clip(6,40)
     else:
