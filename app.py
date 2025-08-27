@@ -3,7 +3,6 @@
 # ARAM PS Dashboard + Data-Dragon 아이콘 (Streamlit 1.32+ 호환)
 # ------------------------------------------------------------------
 import os, ast, re, unicodedata, requests
-from io import BytesIO
 from typing import List
 import numpy as np
 import pandas as pd
@@ -13,7 +12,7 @@ import plotly.express as px
 st.set_page_config(page_title="ARAM PS Dashboard", layout="wide")
 
 # ------------------------------------------------------------------
-# Data-Dragon helpers (동적 매핑)
+# Data-Dragon helpers
 # ------------------------------------------------------------------
 @st.cache_data(show_spinner=False, ttl=86400)
 def ddragon_version()->str:
@@ -46,7 +45,6 @@ def champion_icon_url(name:str)->str:
         n = re.sub(r"[ '&.:]", "", name).lower()
         key = DD["champ_alias"].get(n)
     if not key:
-        # 최후 fallback
         key = re.sub(r"[ '&.:]", "", name)
         key = key[0].upper() + key[1:] + ".png"
     return f"https://ddragon.leagueoflegends.com/cdn/{DDRAGON_VERSION}/img/champion/{key}"
@@ -107,10 +105,14 @@ def load_df(buf) -> pd.DataFrame:
     df["spell_combo"] = (df[s1].astype(str) + " + " + df[s2].astype(str)).str.strip()
     for c in [c for c in df if c.startswith("item")]:
         df[c] = df[c].fillna("").astype(str).str.strip()
-    for col in ("team_champs", "enemy_champs"):
+    for col in ("team_champs","enemy_champs"):
         if col in df:
             df[col] = df[col].apply(_as_list)
-    df["duration_min"] = pd.to_numeric(df.get("game_end_min",18), errors="coerce").fillna(18).clip(6,40)
+    # ✅ game_end_min 없을 때 안전 처리
+    if "game_end_min" in df.columns:
+        df["duration_min"] = pd.to_numeric(df["game_end_min"], errors="coerce").fillna(18).clip(6,40)
+    else:
+        df["duration_min"] = 18
     df["dpm"] = df.get("damage_total", np.nan) / df["duration_min"].replace(0,np.nan)
     for k in ("kills","deaths","assists"):
         df[k] = df.get(k,0)
